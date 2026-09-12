@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "sync:sdk": "tsx scripts/sync-sdk-source.ts",
+    "predev": "npm run sync:sdk",
     "dev": "next dev --port 4317",
+    "prebuild": "npm run sync:sdk",
     "build": "next build",
     "start": "next start --port 4317",
     "lint": "eslint"

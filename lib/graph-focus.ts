@@ -5,7 +5,11 @@ const PROOF_TYPES = new Set(["COVERS", "CONTAINS", "VERIFIED_BY", "TEACHES", "US
 function nodeDetail(node: GraphNode): string {
   if (node.detail) return node.detail;
   if (node.label === "Concept") {
-    return node.documented ? "Documented SDK lesson" : "Undocumented — planner can pick this";
+    const state = node.documented ? "Documented SDK lesson" : "Undocumented — planner can pick this";
+    const source = node.sourcePath
+      ? `${node.sourcePath}${node.sourceSymbol ? ` · ${node.sourceSymbol}` : ""}${node.sourceVersion ? ` · v${node.sourceVersion}` : ""}`
+      : "source metadata unavailable";
+    return `${state}\n${source}`;
   }
   if (node.label === "Cookbook") return "Markdown article that COVERS a concept";
   if (node.label === "CodeBlock") return "Independent TypeScript fence";

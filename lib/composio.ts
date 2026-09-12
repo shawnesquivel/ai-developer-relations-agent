@@ -79,7 +79,10 @@ export async function resolveGithubToolSlugs(preferred: string[]): Promise<strin
     if (!live.length) return fallback;
     const liveSet = new Set(live);
     const matched = fallback.filter((slug) => liveSet.has(slug));
-    return matched.length ? matched : live.slice(0, Math.max(2, fallback.length));
+    // Never substitute an arbitrary live GitHub action. The first page can
+    // contain mutating tools (collaborators, issues, stars) that do not match
+    // the requested cookbook contract.
+    return matched.length ? matched : fallback;
   } catch (error) {
     console.warn("Composio listTools failed — using seed slugs", error instanceof Error ? error.message : error);
     return fallback;

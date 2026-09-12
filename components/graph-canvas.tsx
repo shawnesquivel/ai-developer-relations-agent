@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import ForceGraph3D, { type ForceGraphMethods, type NodeObject } from "react-force-graph-3d";
 import { Button } from "@/components/ui/button";
 import type { GraphLink, GraphNode } from "@/lib/graph-types";
+import { SDK_SOURCE } from "@/lib/sdk-source.generated";
 
 export const LABEL_COLORS: Record<string, string> = {
   Concept: "#26251e",
@@ -119,7 +120,8 @@ export function GraphCanvas({
           {data.mode ? <span className="font-mono text-[12px] uppercase text-ash">{data.mode}</span> : null}
         </div>
         <p className="text-[11px] leading-4 text-muted-foreground">
-          Neo4j chooses the next undocumented concept; runs are its proof.
+          Synced from {SDK_SOURCE.packageName} v{SDK_SOURCE.packageVersion} source. Neo4j chooses the next gap; Daytona
+          runs are its proof.
         </p>
       </div>
       <Legend />

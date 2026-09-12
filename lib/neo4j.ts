@@ -71,6 +71,10 @@ export class MockGraph {
         name: String(n.props.title ?? n.props.name ?? n.id),
         documented: typeof n.props.documented === "boolean" ? n.props.documented : undefined,
         status: n.props.status === "pass" || n.props.status === "fail" ? n.props.status : undefined,
+        sourcePath: typeof n.props.sourcePath === "string" ? n.props.sourcePath : undefined,
+        sourceSymbol: typeof n.props.sourceSymbol === "string" ? n.props.sourceSymbol : undefined,
+        sourceVersion: typeof n.props.sourceVersion === "string" ? n.props.sourceVersion : undefined,
+        sourceKind: typeof n.props.sourceKind === "string" ? n.props.sourceKind : undefined,
       })),
       links,
     };
@@ -216,6 +220,10 @@ export async function fetchSubgraph(label?: string, limit = 200): Promise<{
     name: string;
     documented: boolean | null;
     status: string | null;
+    sourcePath: string | null;
+    sourceSymbol: string | null;
+    sourceVersion: string | null;
+    sourceKind: string | null;
     source: string;
     target: string;
     type: string;
@@ -227,6 +235,8 @@ export async function fetchSubgraph(label?: string, limit = 200): Promise<{
      RETURN n.id AS id, labels(n) AS labels,
             coalesce(n.title, n.name, n.id) AS name,
             n.documented AS documented, n.status AS status,
+            n.sourcePath AS sourcePath, n.sourceSymbol AS sourceSymbol,
+            n.sourceVersion AS sourceVersion, n.sourceKind AS sourceKind,
             startNode(r).id AS source, endNode(r).id AS target, type(r) AS type`,
     { limit: neo4j.int(capped) },
   );
@@ -242,6 +252,10 @@ export async function fetchSubgraph(label?: string, limit = 200): Promise<{
         name: row.name,
         documented: typeof row.documented === "boolean" ? row.documented : undefined,
         status: row.status === "pass" || row.status === "fail" ? row.status : undefined,
+        sourcePath: row.sourcePath ?? undefined,
+        sourceSymbol: row.sourceSymbol ?? undefined,
+        sourceVersion: row.sourceVersion ?? undefined,
+        sourceKind: row.sourceKind ?? undefined,
       });
     }
     if (row.source && row.target && row.type) {

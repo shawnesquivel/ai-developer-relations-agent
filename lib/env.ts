@@ -16,6 +16,7 @@ export const env = {
   OPENAI_API_KEY: read("OPENAI_API_KEY"),
   OPENAI_MODEL: read("OPENAI_MODEL") ?? "gpt-5.6-sol",
   COMPOSIO_API_KEY: read("COMPOSIO_API_KEY"),
+  DENNIS_PUBLIC_URL: read("DENNIS_PUBLIC_URL"),
   GITHUB_PAT: read("GITHUB_PAT"),
   COMPOSIO_USER_ID: read("COMPOSIO_USER_ID") ?? "hacksprint-demo",
 };
@@ -30,8 +31,7 @@ export type IntegrationStatus = {
 };
 
 export function llmProvider(): "nosana" | "openai" | "mock" {
-  if (env.OPENAI_API_KEY) return "openai";
-  if (env.NOSANA_ENDPOINT) return "nosana";
+  if (env.OPENAI_API_KEY?.startsWith("sk-")) return "openai";
   return "mock";
 }
 
@@ -60,6 +60,7 @@ function nosanaHostDetail(): string {
     }
   }
   if (provider === "openai") return `OpenAI ${env.OPENAI_MODEL}`;
+  if (env.OPENAI_API_KEY) return "Invalid OpenAI key format · deterministic fallback";
   return "Deterministic mock author";
 }
 

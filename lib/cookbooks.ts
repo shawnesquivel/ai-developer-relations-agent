@@ -6,6 +6,7 @@ import { getMockGraph, runCypher, toNumber, upsertNodes, upsertRelationships } f
 import {
   CONCEPTS,
   DOCUMENTED_PREREQ_IDS,
+  inferCoveredConceptIds,
   LEGACY_CONCEPT_IDS,
   SEED_COOKBOOKS,
   SEED_LINKS,
@@ -53,18 +54,36 @@ function uniqueBy<T>(items: T[], key: (item: T) => string): T[] {
 }
 
 function coverIds(cb: (typeof SEED_COOKBOOKS)[number]): string[] {
-  return uniqueBy([cb.conceptId, ...(cb.covers ?? [])], (id) => id);
+  return uniqueBy(
+    [cb.conceptId, ...(cb.covers ?? []), ...inferCoveredConceptIds(cb.markdown)]
+      .filter((id) => CORE_CONCEPT_IDS.includes(id)),
+    (id) => id,
+  );
 }
 
 type GlobalSeed = typeof globalThis & { __cookbookSeedGen?: string };
 
 const SEED_GEN = [
-  CONCEPTS.map((c) => `${c.id}:${c.documented}`).join(","),
+  CONCEPTS.map((c) => `${c.id}:${c.documented}:${c.sourceHash ?? ""}`).join(","),
   SEED_COOKBOOKS.map((cb) => `${cb.id}:${cb.title}:${cb.documented}:${cb.blocks.map((b) => b.code.length).join("-")}`).join(","),
 ].join("|");
 
 function seededFlag(): GlobalSeed {
   return globalThis as GlobalSeed;
+}
+
+function conceptProps(concept: (typeof CONCEPTS)[number]) {
+  return {
+    name: concept.name,
+    documented: concept.documented,
+    sourcePath: concept.sourcePath,
+    sourceSymbol: concept.sourceSymbol,
+    sourceHash: concept.sourceHash,
+    sourcePackage: concept.sourcePackage,
+    sourceVersion: concept.sourceVersion,
+    sourceKind: concept.sourceKind,
+    evidence: concept.evidence,
+  };
 }
 
 export async function ensureSeeded(): Promise<void> {
@@ -85,7 +104,7 @@ export async function ensureSeeded(): Promise<void> {
 
 function seedIntoMock() {
   const g = getMockGraph();
-  g.upsertNodes(CONCEPTS.map((c) => ({ id: c.id, label: "Concept", props: { name: c.name, documented: c.documented } })));
+  g.upsertNodes(CONCEPTS.map((c) => ({ id: c.id, label: "Concept", props: conceptProps(c) })));
   g.upsertNodes(TOOLKITS.map((t) => ({ id: t.id, label: "Toolkit", props: { name: t.name, slug: t.slug } })));
   g.upsertNodes(TOOLS.map((t) => ({ id: t.id, label: "Tool", props: { name: t.name, description: t.description } })));
   for (const cb of SEED_COOKBOOKS) {
@@ -225,22 +244,13 @@ async function persistSeedCookbook(cb: (typeof SEED_COOKBOOKS)[number], withBloc
 }
 
 async function seedIntoNeo4j() {
-  await upsertNodes(CONCEPTS.map((c) => ({ id: c.id, label: "Concept", props: { name: c.name, documented: c.documented } })));
+  await upsertNodes(CONCEPTS.map((c) => ({ id: c.id, label: "Concept", props: conceptProps(c) })));
   await upsertNodes(TOOLKITS.map((t) => ({ id: t.id, label: "Toolkit", props: { name: t.name, slug: t.slug } })));
   await upsertNodes(TOOLS.map((t) => ({ id: t.id, label: "Tool", props: { name: t.name, description: t.description } })));
   await upsertRelationships(SEED_LINKS);
   for (const cb of SEED_COOKBOOKS) {
     await persistSeedCookbook(cb, true);
   }
-}
-
-function keepSeedCookbook<T extends { id: string; createdAt?: string }>(books: T[]): T {
-  return [...books].sort((a, b) => {
-    const as = SEED_COOKBOOK_IDS.includes(a.id) ? 0 : 1;
-    const bs = SEED_COOKBOOK_IDS.includes(b.id) ? 0 : 1;
-    if (as !== bs) return as - bs;
-    return String(a.createdAt ?? "").localeCompare(String(b.createdAt ?? ""));
-  })[0];
 }
 
 function stripStaleSeedCoversMock() {
@@ -262,22 +272,7 @@ function stripStaleSeedCoversMock() {
 }
 
 function dedupeMockCookbooks() {
-  const g = getMockGraph();
-  const byTitle = new Map<string, { id: string; createdAt: string }[]>();
-  for (const book of g.nodesByLabel("Cookbook")) {
-    const title = String(book.props.title ?? book.id);
-    const list = byTitle.get(title) ?? [];
-    list.push({ id: book.id, createdAt: String(book.props.createdAt ?? "") });
-    byTitle.set(title, list);
-  }
-  for (const books of byTitle.values()) {
-    if (books.length < 2) continue;
-    const keep = keepSeedCookbook(books);
-    for (const extra of books.filter((b) => b.id !== keep.id)) {
-      g.nodes.delete(extra.id);
-      g.rels = g.rels.filter((r) => r.from !== extra.id && r.to !== extra.id);
-    }
-  }
+  // MockGraph is keyed by stable id. Repeated titles are valid generated revisions.
 }
 
 async function stripStaleSeedCovers() {
@@ -312,21 +307,6 @@ async function dedupeNeo4jCookbooks() {
      OPTIONAL MATCH (extra)-[:CONTAINS]->(b:CodeBlock)
      OPTIONAL MATCH (b)-[:VERIFIED_BY]->(r:Run)
      DETACH DELETE extra, b, r`,
-  );
-  await runCypher(
-    `MATCH (cb:Cookbook)
-     WITH coalesce(cb.title, cb.id) AS title, collect(cb) AS nodes
-     WHERE size(nodes) > 1 AND title <> ''
-     UNWIND nodes AS n
-     WITH title, n
-     ORDER BY CASE WHEN n.id IN $seedIds THEN 0 ELSE 1 END, n.createdAt ASC, elementId(n) ASC
-     WITH title, collect(n) AS ordered
-     WITH ordered[0] AS keep, tail(ordered) AS extras
-     UNWIND extras AS extra
-     OPTIONAL MATCH (extra)-[:CONTAINS]->(b:CodeBlock)
-     OPTIONAL MATCH (b)-[:VERIFIED_BY]->(r:Run)
-     DETACH DELETE extra, b, r`,
-    { seedIds: SEED_COOKBOOK_IDS },
   );
 }
 
@@ -645,7 +625,7 @@ export async function getCookbook(id: string): Promise<Cookbook | null> {
 }
 
 function uniqueCookbooks(books: Cookbook[]): Cookbook[] {
-  return uniqueBy(uniqueBy(books, (b) => b.id), (b) => b.title);
+  return uniqueBy(books, (b) => b.id);
 }
 
 export async function listCookbooks(): Promise<Cookbook[]> {
@@ -729,8 +709,10 @@ export async function createCookbook(input: {
   const uses = blocks.flatMap((block, i) =>
     inferUsedTools(block.code).map((slug) => ({ from: blockIds[i], to: slug, type: "USES" as const })),
   );
+  const coveredConceptIds = uniqueIds([input.conceptId, ...inferCoveredConceptIds(markdown)])
+    .filter((conceptId) => CORE_CONCEPT_IDS.includes(conceptId));
   await upsertRelationships([
-    { from: id, to: input.conceptId, type: "COVERS" },
+    ...coveredConceptIds.map((conceptId) => ({ from: id, to: conceptId, type: "COVERS" })),
     ...blockIds.map((blockId) => ({ from: id, to: blockId, type: "CONTAINS" })),
     ...uses,
   ]);
@@ -829,6 +811,12 @@ export function getBlockCode(cookbook: Cookbook, blockId: string): CodeBlock | u
 export function sandboxEnvVars(): Record<string, string> {
   const vars: Record<string, string> = {};
   if (env.COMPOSIO_API_KEY) vars.COMPOSIO_API_KEY = env.COMPOSIO_API_KEY;
+  if (env.COMPOSIO_API_KEY) {
+    const deploymentHost = process.env.VERCEL_URL ?? process.env.VERCEL_PROJECT_PRODUCTION_URL;
+    const publicOrigin = env.DENNIS_PUBLIC_URL
+      ?? (deploymentHost ? `https://${deploymentHost}` : "https://dennis-dusky.vercel.app");
+    vars.COMPOSIO_BASE_URL = `${publicOrigin.replace(/\/$/, "")}/api/composio-proxy`;
+  }
   if (env.GITHUB_PAT) vars.GITHUB_PAT = env.GITHUB_PAT;
   if (env.OPENAI_API_KEY) vars.OPENAI_API_KEY = env.OPENAI_API_KEY;
   if (env.OPENAI_MODEL) vars.OPENAI_MODEL = env.OPENAI_MODEL;

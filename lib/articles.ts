@@ -295,6 +295,10 @@ Pi-shaped agents need a **who-am-I** they can trust. This article uses a GitHub 
 
 **Why this exists.** Docs rot when the hello-world is a screenshot. We prove the live user with \`${primary}\`.
 
+## How it works
+
+The article follows the same dependency chain Dennis stores in Neo4j: construct the client, create a PAT-backed connected account, then execute one read-only tool. The blocks do not share files, variables, or processes. Dennis uploads and executes each fence in a separate Daytona sandbox, so a hidden setup step cannot make a later example appear healthy.
+
 ## Prerequisites
 
 - \`COMPOSIO_API_KEY\`
@@ -325,6 +329,10 @@ Call \`tools.execute\` with \`dangerouslySkipVersionCheck: true\`.
 
 ${fence(executeBlock(primary))}
 
+## Expected output
+
+The final block prints a bounded JSON response containing the authenticated GitHub user. A missing credential prints an explicit skip. Authentication, network, SDK, and tool errors exit non-zero and become failed \`Run\` nodes instead of being rewritten as success.
+
 ## What this proved
 
 Stdout should include a GitHub login, or a clear missing-env skip. If Composio cannot be reached from the sandbox, the run **fails honestly** — that failure is the proof graph working, not a mocked pass.
@@ -337,6 +345,10 @@ export function langChainComposioArticle(primary = WHOAMI): string {
 Bind **one** GitHub tool schema to a LangChain-shaped descriptor and invoke it once. No extra \`@langchain\` install — the adapter is a plain object so the block stays independently runnable.
 
 **Why this exists.** Framework glue is where copy-paste examples go stale. We keep the surface to \`tools.get\` then \`tools.execute\`.
+
+## How it works
+
+Dennis first verifies the raw Composio schema, then verifies the small adapter independently. That separation makes it obvious whether a failure belongs to schema retrieval, framework adaptation, authentication, or execution. Both blocks are isolated Daytona runs and both must pass before Neo4j adds a \`TEACHES\` relationship.
 
 ## Prerequisites
 
@@ -356,6 +368,10 @@ Wrap the schema in a tiny \`{ name, invoke }\` tool and call it once. Still PAT/
 
 ${fence(langchainInvokeBlock(primary))}
 
+## Expected output
+
+The first run prints the selected schema name. The second prints the adapter name and a bounded execution result. Any API or connection error remains visible as failed sandbox evidence.
+
 ## What this proved
 
 You bound one GitHub schema and invoked it. The stdout line starting with \`invoke\` is the proof — or an honest error if the sandbox cannot reach Composio.
@@ -368,6 +384,10 @@ export function eveComposioArticle(primary = WHOAMI): string {
 Eve-shaped agents inspect tool schemas before they call anything. This article does that on \`@composio/core\` directly — **no Eve SDK is imported**. If you later drop this into Eve, you are still calling \`tools.get\` then one read-only execute.
 
 **Why this exists.** “List the tools” is the honest first Eve lesson. A Slack bot example would lie about the surface.
+
+## How it works
+
+The first block proves schema discovery without an agent framework. The second proves a read-only invocation. Dennis verifies them separately so the cookbook cannot rely on a long-lived Eve session or state from a previous snippet.
 
 ## Prerequisites
 
@@ -386,6 +406,10 @@ Execute the same slug with \`dangerouslySkipVersionCheck: true\`. Read-only. No 
 
 ${fence(eveReadBlock(primary))}
 
+## Expected output
+
+Schema discovery prints one matching tool. The read-only call prints bounded JSON for the authenticated user. Live failures remain failed \`Run\` evidence.
+
 ## What this proved
 
 Eve (the persona) listed a schema and made one read-only GitHub call through Composio. Seed verification of this article is **mock mode** until you press Verify — mock runs are not live proof.
@@ -398,6 +422,10 @@ export function eveDaytonaArticle(): string {
 Eve-shaped agents should not trust a snippet they have never executed. This article creates a **fresh Daytona sandbox**, runs a five-line program, then deletes the sandbox in \`finally\`.
 
 **Why this exists.** Nested sandbox create/exec/delete is the smallest honest Daytona lesson. The outer cookbook runner also uses Daytona — that is the same judge.
+
+## How it works
+
+Dennis first verifies that the Daytona SDK can be constructed from environment configuration. The second block creates a new sandbox, executes a deliberately tiny program, captures its exit code, and deletes it in \`finally\`. No block can inherit state from another block.
 
 ## Prerequisites
 
@@ -417,6 +445,10 @@ The inner program is five statements: a banner, the user id, \`process.version\`
 
 ${fence(daytonaExecBlock())}
 
+## Expected output
+
+The first run prints the configured target. The second prints a sandbox id, \`exitCode 0\`, the Node version, and \`ok\`. Cleanup runs whether execution passes or fails.
+
 ## What this proved
 
 Stdout includes \`sandboxId\` and \`exitCode 0\`, or a clear skip when \`DAYTONA_API_KEY\` is missing. A live network failure is recorded as a failed Run — not rewritten into a pass.
@@ -427,6 +459,10 @@ export function clientArticle(): string {
   return `# new Composio({ apiKey })
 
 The first \`@composio/core\` lesson is constructing a client. Everything else — schemas, PAT, execute — hangs off this object.
+
+## How it works
+
+The first isolated block validates environment handling without importing the SDK. The second imports the installed package and constructs the public \`Composio\` class found in the synced source manifest.
 
 ## Prerequisites
 
@@ -447,6 +483,10 @@ console.log("apiKey present", Boolean(apiKey));`)}
 
 ${fence(clientBlock())}
 
+## Expected output
+
+The first block confirms whether configuration exists. The second prints \`Composio client ready true\` when the installed SDK exposes its core models.
+
 ## What this proved
 
 \`Composio client ready true\` means the constructor accepted the key and exposed \`tools\`.
@@ -457,6 +497,10 @@ export function authArticle(primary = WHOAMI): string {
   return `# authConfigs + PAT
 
 GitHub in this project is a **fine-grained PAT**, never browser OAuth and never Slack OAuth.
+
+## How it works
+
+One block verifies the base client. The next creates the source-backed \`AuthConfigs.create\` resource and passes the PAT to \`ConnectedAccounts.initiate\`. Each block runs alone in Daytona.
 
 ## Prerequisites
 
@@ -471,6 +515,10 @@ ${fence(clientBlock())}
 ## 2. Create an auth config and connect the PAT
 
 ${fence(authBlock(primary))}
+
+## Expected output
+
+The auth block prints the new auth-config id and then confirms the connected demo user. Missing credentials produce an explicit skip; provider errors fail the run.
 
 ## What this proved
 
@@ -539,7 +587,11 @@ export function typescriptFenceCount(markdown: string): number {
 export function ensureFullArticle(markdown: string, hint: string, toolSlugs: string[] = []): string {
   const fences = typescriptFenceCount(markdown);
   const title = extractTitle(markdown, "");
-  if (fences >= 2 && title && markdown.length > 400) return markdown;
+  const requiredSections = ["How it works", "Prerequisites", "Expected output", "What this proved"];
+  const hasStructure = requiredSections.every((section) =>
+    new RegExp(`^##\\s+${section}`, "im").test(markdown),
+  );
+  if (fences >= 2 && title && hasStructure && markdown.length >= 1_200) return markdown;
   return articleForPrompt(hint, toolSlugs);
 }
 

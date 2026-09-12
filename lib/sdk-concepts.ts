@@ -6,34 +6,59 @@ import {
   piComposioArticle,
 } from "./articles";
 import { extractCodeBlocks } from "./markdown";
+import { SDK_SOURCE } from "./sdk-source.generated";
 import type { SeedConcept, SeedCookbook, SeedLink } from "./seed";
 
+const DOCUMENTED_SOURCE_IDS = new Set([
+  "c-client",
+  "c-tools-get",
+  "c-auth-configs",
+  "c-connected-accounts",
+]);
+
 /**
- * @composio/core public surface — used by ensureSeeded / Plan.
- * Slack/docs product titles stay in LEGACY so they cannot win Plan.
+ * Generated from the newest available @composio/core source by
+ * scripts/sync-sdk-source.ts. Cookbook fences add COVERS/USES proof below.
  */
 export const CONCEPTS: SeedConcept[] = [
-  { id: "c-client", name: "new Composio({ apiKey })", documented: true },
-  { id: "c-tools-get", name: "composio.tools.get", documented: true },
-  { id: "c-auth-pat", name: "authConfigs + PAT", documented: true },
-  { id: "c-execute", name: "tools.execute", documented: false },
-  { id: "c-tool-bind", name: "bind tool descriptor", documented: false },
-  { id: "c-daytona-exec", name: "Daytona sandbox exec", documented: false },
+  ...SDK_SOURCE.concepts.map((concept) => ({
+    ...concept,
+    documented: DOCUMENTED_SOURCE_IDS.has(concept.id),
+    sourcePackage: SDK_SOURCE.packageName,
+    sourceVersion: SDK_SOURCE.packageVersion,
+    sourceKind: SDK_SOURCE.sourceKind,
+  })),
+  {
+    id: "c-daytona-exec",
+    name: "Daytona sandbox verification",
+    documented: false,
+    sourcePackage: "@daytonaio/sdk",
+    sourceVersion: "0.211.2",
+    sourcePath: "lib/daytona.ts",
+    sourceSymbol: "runCodeBlock",
+    sourceKind: "verification-boundary",
+    evidence: "fresh sandbox per block",
+  },
 ];
 
 export const DOCUMENTED_PREREQ_IDS = CONCEPTS.filter((c) => c.documented).map((c) => c.id);
 
 export const SIMPLE_CONCEPT_IDS = [
   "c-client",
+  "c-toolkits",
   "c-tools-get",
-  "c-auth-pat",
+  "c-auth-configs",
+  "c-connected-accounts",
   "c-execute",
+  "c-sessions",
+  "c-triggers",
   "c-tool-bind",
   "c-daytona-exec",
 ] as const;
 
 export const LEGACY_CONCEPT_IDS = [
   "c-install",
+  "c-auth-pat",
   "c-connected",
   "c-connected-accounts",
   "c-auth-scheme",
@@ -54,9 +79,14 @@ export const LEGACY_CONCEPT_IDS = [
 ] as const;
 
 export const SEED_LINKS: SeedLink[] = [
-  { from: "c-client", to: "c-tools-get", type: "PREREQ_OF" },
-  { from: "c-tools-get", to: "c-auth-pat", type: "PREREQ_OF" },
-  { from: "c-auth-pat", to: "c-execute", type: "PREREQ_OF" },
+  { from: "c-client", to: "c-toolkits", type: "PREREQ_OF" },
+  { from: "c-toolkits", to: "c-tools-get", type: "PREREQ_OF" },
+  { from: "c-client", to: "c-auth-configs", type: "PREREQ_OF" },
+  { from: "c-auth-configs", to: "c-connected-accounts", type: "PREREQ_OF" },
+  { from: "c-tools-get", to: "c-execute", type: "PREREQ_OF" },
+  { from: "c-connected-accounts", to: "c-execute", type: "PREREQ_OF" },
+  { from: "c-connected-accounts", to: "c-sessions", type: "PREREQ_OF" },
+  { from: "c-sessions", to: "c-triggers", type: "PREREQ_OF" },
   { from: "c-tools-get", to: "c-tool-bind", type: "PREREQ_OF" },
   { from: "c-client", to: "c-daytona-exec", type: "PREREQ_OF" },
   { from: "tk-github", to: "GITHUB_GET_THE_AUTHENTICATED_USER", type: "EXPOSES" },
@@ -64,10 +94,29 @@ export const SEED_LINKS: SeedLink[] = [
   { from: "tk-github", to: "GITHUB_CREATE_AN_ISSUE", type: "EXPOSES" },
   { from: "tk-github", to: "GITHUB_STAR_A_REPOSITORY_FOR_THE_AUTHENTICATED_USER", type: "EXPOSES" },
   { from: "GITHUB_GET_THE_AUTHENTICATED_USER", to: "c-tools-get", type: "DEMONSTRATES" },
-  { from: "GITHUB_GET_THE_AUTHENTICATED_USER", to: "c-auth-pat", type: "DEMONSTRATES" },
+  { from: "GITHUB_GET_THE_AUTHENTICATED_USER", to: "c-auth-configs", type: "DEMONSTRATES" },
+  { from: "GITHUB_GET_THE_AUTHENTICATED_USER", to: "c-connected-accounts", type: "DEMONSTRATES" },
   { from: "GITHUB_GET_THE_AUTHENTICATED_USER", to: "c-execute", type: "DEMONSTRATES" },
   { from: "GITHUB_GET_THE_AUTHENTICATED_USER", to: "c-tool-bind", type: "DEMONSTRATES" },
 ];
+
+const CONTENT_SIGNALS: { id: string; pattern: RegExp }[] = [
+  { id: "c-client", pattern: /new\s+Composio\s*\(/ },
+  { id: "c-toolkits", pattern: /composio\.toolkits\./ },
+  { id: "c-tools-get", pattern: /composio\.tools\.get\s*\(/ },
+  { id: "c-auth-configs", pattern: /authConfigs\.create\s*\(/ },
+  { id: "c-connected-accounts", pattern: /connectedAccounts\.initiate\s*\(/ },
+  { id: "c-execute", pattern: /tools\.execute\s*\(/ },
+  { id: "c-sessions", pattern: /(?:sessions\.create|composio\.create)\s*\(/ },
+  { id: "c-triggers", pattern: /triggers\.(?:create|subscribe)\s*\(/ },
+  { id: "c-tool-bind", pattern: /(?:LangChain|bind tool|invoke\s*:)/i },
+  { id: "c-daytona-exec", pattern: /(?:new\s+Daytona|daytona\.create)\s*\(/i },
+];
+
+/** Maps the actual article/code content back to source-derived SDK concepts. */
+export function inferCoveredConceptIds(markdown: string): string[] {
+  return CONTENT_SIGNALS.filter(({ pattern }) => pattern.test(markdown)).map(({ id }) => id);
+}
 
 const SEED_AT = "2026-09-12T00:00:00.000Z";
 
@@ -134,7 +183,7 @@ export const SEED_COOKBOOKS: SeedCookbook[] = [
     id: "cb-pi-composio",
     title: "Pi + Composio",
     conceptId: "c-execute",
-    covers: ["c-auth-pat"],
+    covers: ["c-auth-configs", "c-connected-accounts"],
     markdown: piComposioArticle(),
     documented: false,
   }),

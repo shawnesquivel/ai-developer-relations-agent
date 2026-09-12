@@ -8,16 +8,22 @@ import {
 import { chat } from "./llm";
 import { extractTitle } from "./markdown";
 import { llmProvider } from "./env";
+import { SDK_SOURCE } from "./sdk-source.generated";
 
-export const SYSTEM = `You write practical @composio/core TypeScript cookbook ARTICLES from the SDK surface, not docs.composio.dev product examples.
+export const SYSTEM = `You are Dennis, an AI-native Developer Relations engineer. Write production-quality @composio/core TypeScript cookbook ARTICLES grounded in the supplied SDK source manifest.
 
 A cookbook is a short Markdown article in this exact order:
 1. One H1 title (# Title)
-2. A concise why / explanation paragraph
-3. A Prerequisites (or Setup) section with bullets
-4. 2–4 independently runnable fenced \`\`\`typescript blocks
-5. Prose between every block explaining that step
-6. A final "What this proved" section
+2. A 2–3 paragraph introduction: the problem, why this API exists, and what the reader will build
+3. A "How it works" section that explains the API relationships and execution flow
+4. A Prerequisites section with exact packages and environment variables
+5. 2–4 numbered implementation sections, each with explanatory prose before its code
+6. 2–4 independently runnable fenced \`\`\`typescript blocks
+7. Prose after every block explaining its stdout and failure modes
+8. An "Expected output" section
+9. A final "What this proved" section that states the verification boundary
+
+Target 500–900 words, excluding code. Prefer concrete explanation over marketing language.
 
 Concepts, in order:
 1. new Composio({ apiKey, toolkitVersions: { github: "latest" } })
@@ -39,7 +45,9 @@ Hard rules:
   composio.connectedAccounts.initiate(userId, authConfig.id, { allowMultiple: true, config: AuthScheme.BearerToken({ token }) })
 - Prefer GITHUB_GET_THE_AUTHENTICATED_USER as the proof call.
 - If the requested title mentions Slack or another product example, still emit the GitHub PAT who-am-I article.
-- Keep prose concise. No JSON wrapper.`;
+- Never claim an API that is absent from the source manifest.
+- Explain that each fence executes in an isolated Daytona sandbox with no shared state.
+- No JSON wrapper.`;
 
 export type CookbookKind = ArticleKind;
 
@@ -86,9 +94,11 @@ async function generateArticle(hint: string, slugs: string[], kind: ArticleKind)
 
   const user = [
     `Write a Composio TypeScript cookbook ARTICLE for: ${hint}.`,
+    `Installed SDK: ${SDK_SOURCE.packageName}@${SDK_SOURCE.packageVersion} (${SDK_SOURCE.sourceKind}).`,
+    `Relevant source symbols: ${SDK_SOURCE.concepts.map((concept) => `${concept.sourceSymbol} in ${concept.sourcePath}`).join("; ")}.`,
     `Real GitHub tool slugs from Composio: ${slugs.join(", ")}.`,
     KIND_PROMPT[kind],
-    "Emit 2–4 typescript fences with prose between them. Never a single snippet.",
+    "Emit 2–4 TypeScript fences with substantial explanatory prose before and after each. Never a single snippet.",
     "Never generate Slack OAuth or browser OAuth. GitHub PAT only.",
   ].join("\n");
 

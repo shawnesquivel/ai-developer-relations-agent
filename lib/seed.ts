@@ -1,4 +1,15 @@
-export type SeedConcept = { id: string; name: string; documented: boolean };
+export type SeedConcept = {
+  id: string;
+  name: string;
+  documented: boolean;
+  sourcePath?: string;
+  sourceSymbol?: string;
+  sourceHash?: string;
+  sourcePackage?: string;
+  sourceVersion?: string;
+  sourceKind?: string;
+  evidence?: string;
+};
 export type SeedToolkit = { id: string; name: string; slug: string };
 export type SeedTool = { id: string; name: string; description: string };
 export type SeedLink = { from: string; to: string; type: string };

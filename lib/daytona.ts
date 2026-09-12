@@ -143,7 +143,10 @@ function mockSandboxRun(opts: { command?: string; code?: string }) {
   };
 }
 
-export async function runCodeBlock(code: string): Promise<{
+export async function runCodeBlock(
+  code: string,
+  onProgress?: (step: "creating" | "uploading" | "installing" | "executing" | "deleting") => void,
+): Promise<{
   status: RunRecord["status"];
   exitCode: number;
   stdout: string;
@@ -152,6 +155,7 @@ export async function runCodeBlock(code: string): Promise<{
   durationMs: number;
 }> {
   if (!env.DAYTONA_API_KEY) {
+    onProgress?.("executing");
     const result = mockRunBlock(code);
     return { ...result, durationMs: 18 };
   }
@@ -159,14 +163,29 @@ export async function runCodeBlock(code: string): Promise<{
   const started = Date.now();
   let sandbox: Sandbox | null = null;
   try {
+    onProgress?.("creating");
     sandbox = await createSandbox(sandboxEnvVars());
+    onProgress?.("uploading");
     await uploadSource(sandbox, code, "block.ts");
-    const result = await sandbox.process.executeCommand(
-      "npm init -y >/dev/null 2>&1 && npm i --silent --no-audit --no-fund @composio/core @daytonaio/sdk openai tsx >/dev/null 2>&1 && npx tsx block.ts",
+    onProgress?.("installing");
+    const install = await sandbox.process.executeCommand(
+      "npm init -y >/dev/null 2>&1 && npm i --silent --no-audit --no-fund @composio/core @daytonaio/sdk openai tsx",
       undefined,
       undefined,
       COMMAND_TIMEOUT,
     );
+    if ((install.exitCode ?? 0) !== 0) {
+      return {
+        status: "fail",
+        exitCode: install.exitCode ?? 1,
+        stdout: String(install.result ?? "Dependency installation failed"),
+        sandboxId: sandbox.id,
+        mode: "live",
+        durationMs: Date.now() - started,
+      };
+    }
+    onProgress?.("executing");
+    const result = await sandbox.process.executeCommand("npx tsx block.ts", undefined, undefined, COMMAND_TIMEOUT);
     const exitCode = result.exitCode ?? 0;
     const stdout = String(result.result ?? "");
     return {
@@ -178,6 +197,7 @@ export async function runCodeBlock(code: string): Promise<{
       durationMs: Date.now() - started,
     };
   } finally {
+    onProgress?.("deleting");
     await deleteSandbox(sandbox);
   }
 }

@@ -33,6 +33,95 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   return json as T;
 }
 
+type StreamEvent<T> =
+  | { type: "progress"; step: string; detail: string }
+  | ({ type: "result" } & T)
+  | { type: "error"; error: string };
+
+async function streamApi<T>(
+  url: string,
+  body: Record<string, unknown>,
+  onProgress: (step: string, detail: string) => void,
+): Promise<T> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...body, stream: true }),
+  });
+  if (!res.ok || !res.body) {
+    const json = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(json?.error ?? `HTTP ${res.status}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: T | null = null;
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const event = JSON.parse(line) as StreamEvent<T>;
+      if (event.type === "progress") onProgress(event.step, event.detail);
+      if (event.type === "error") throw new Error(event.error);
+      if (event.type === "result") result = event;
+    }
+    if (done) break;
+  }
+  if (!result) throw new Error("The operation ended without a result");
+  return result;
+}
+
+type StepStatus = "pending" | "active" | "complete" | "failed";
+type PipelineStep = { id: string; label: string; status: StepStatus; detail?: string };
+
+const BUILD_PIPELINE: PipelineStep[] = [
+  { id: "source", label: "Read SDK source graph", status: "pending" },
+  { id: "context", label: "Load Composio tool context", status: "pending" },
+  { id: "writing", label: "Write cookbook article", status: "pending" },
+  { id: "persisting", label: "Persist article and code blocks", status: "pending" },
+  { id: "sandbox", label: "Run blocks in fresh Daytona sandboxes", status: "pending" },
+  { id: "proof", label: "Record Neo4j proof", status: "pending" },
+];
+
+function ProgressPanel({ title, steps }: { title: string; steps: PipelineStep[] }) {
+  return (
+    <div className="rounded border border-stone bg-parchment p-3" aria-live="polite">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className="text-sm font-medium">{title}</p>
+        <span className="font-mono text-[11px] tabular-nums text-ash">
+          {steps.filter((step) => step.status === "complete").length}/{steps.length}
+        </span>
+      </div>
+      <ol className="space-y-1.5">
+        {steps.map((step) => (
+          <li key={step.id} className="flex min-h-8 items-start gap-2">
+            <span
+              className={cn(
+                "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border font-mono text-[10px]",
+                step.status === "complete" && "border-forest bg-forest text-parchment",
+                step.status === "active" && "animate-spin border-ink border-t-transparent text-transparent",
+                step.status === "failed" && "border-crimson bg-crimson text-parchment",
+                step.status === "pending" && "border-stone text-mist",
+              )}
+            >
+              {step.status === "complete" ? "✓" : step.status === "failed" ? "!" : "·"}
+            </span>
+            <div className="min-w-0">
+              <p className={cn("text-[12px]", step.status === "pending" ? "text-mist" : "text-ink")}>
+                {step.label}
+              </p>
+              {step.detail ? <p className="font-mono text-[11px] leading-4 text-ash">{step.detail}</p> : null}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 export function Workbench() {
   const [cookbooks, setCookbooks] = useState<Cookbook[] | null>(null);
   const [broken, setBroken] = useState<BrokenCookbook[]>([]);
@@ -40,12 +129,57 @@ export function Workbench() {
   const [plan, setPlan] = useState<PlanResult | null>(null);
   const [phase, setPhase] = useState<"idle" | "planning" | "generating" | "building">("idle");
   const [buildStatus, setBuildStatus] = useState<string | null>(null);
+  const [pipeline, setPipeline] = useState<PipelineStep[] | null>(null);
+  const [pipelineTitle, setPipelineTitle] = useState("Build progress");
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [runningBlockId, setRunningBlockId] = useState<string | null>(null);
   const [graphKey, setGraphKey] = useState(0);
   const [showCypher, setShowCypher] = useState(false);
   const [generated, setGenerated] = useState(false);
+
+  function beginPipeline(title: string, steps = BUILD_PIPELINE) {
+    setPipelineTitle(title);
+    setPipeline(steps.map((step, index) => ({ ...step, status: index === 0 ? "active" : "pending" })));
+  }
+
+  function advancePipeline(stepId: string, detail: string) {
+    const mapped = ["creating", "uploading", "installing", "executing", "deleting"].includes(stepId)
+      ? "sandbox"
+      : ["recording", "finalizing"].includes(stepId)
+        ? "proof"
+        : stepId;
+    setPipeline((current) => {
+      if (!current) return current;
+      const target = current.findIndex((step) => step.id === mapped);
+      if (target < 0) return current;
+      return current.map((step, index) => ({
+        ...step,
+        status: index < target ? "complete" : index === target ? "active" : "pending",
+        detail: index === target ? detail : index > target ? undefined : step.detail,
+      }));
+    });
+  }
+
+  function completePipeline(detail: string) {
+    setPipeline((current) =>
+      current?.map((step, index) => ({
+        ...step,
+        status: "complete",
+        detail: index === current.length - 1 ? detail : step.detail,
+      })) ?? null,
+    );
+  }
+
+  function failPipeline(message: string) {
+    setPipeline((current) => {
+      if (!current) return current;
+      const active = current.findIndex((step) => step.status === "active");
+      return current.map((step, index) =>
+        index === Math.max(active, 0) ? { ...step, status: "failed", detail: message } : step,
+      );
+    });
+  }
 
   const refreshCookbooks = useCallback(async () => {
     const data = await api<{ cookbooks: Cookbook[]; broken?: BrokenCookbook[] }>("/api/cookbook");
@@ -78,14 +212,20 @@ export function Workbench() {
 
   async function doPlan() {
     setPhase("planning");
+    beginPipeline("Neo4j planner", [
+      { id: "source", label: "Query source-backed prerequisite graph", status: "pending" },
+    ]);
     setError(null);
     setGenerated(false);
     try {
       const next = await api<PlanResult>("/api/cookbook/plan", { method: "POST" });
       setPlan(next);
+      completePipeline(`Picked ${next.conceptName} · unlocks ${next.unlocks}`);
     } catch (err) {
       setPlan(null);
-      setError(err instanceof Error ? err.message : "plan failed");
+      const message = err instanceof Error ? err.message : "plan failed";
+      setError(message);
+      failPipeline(message);
     } finally {
       setPhase("idle");
     }
@@ -94,6 +234,10 @@ export function Workbench() {
   async function doGenerate() {
     if (!plan) return;
     setPhase("generating");
+    beginPipeline("Write planned cookbook", [
+      { id: "writing", label: "Write source-grounded cookbook article", status: "pending" },
+      { id: "persisting", label: "Persist article and blocks in Neo4j", status: "pending" },
+    ]);
     setError(null);
     try {
       const result = await api<{ cookbook: Cookbook }>("/api/cookbook/generate", {
@@ -107,26 +251,30 @@ export function Workbench() {
       }
       setGenerated(true);
       setGraphKey((k) => k + 1);
+      completePipeline("Cookbook persisted and ready to verify");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "generate failed");
+      const message = err instanceof Error ? err.message : "generate failed";
+      setError(message);
+      failPipeline(message);
     } finally {
       setPhase("idle");
     }
   }
 
-  async function runBlockOn(cookbookId: string, blockId: string) {
+  async function runBlockOn(cookbookId: string, blockId: string, blockLabel?: string) {
     setRunningBlockId(blockId);
     setError(null);
     try {
-      const result = await api<{ cookbook: Cookbook }>("/api/cookbook/run", {
-        method: "POST",
-        body: JSON.stringify({ cookbookId, blockId }),
+      const result = await streamApi<{ cookbook: Cookbook }>("/api/cookbook/run", { cookbookId, blockId }, (step, detail) => {
+        advancePipeline(step, blockLabel ? `${blockLabel} · ${detail}` : detail);
       });
       setCookbooks((prev) => (prev ?? []).map((c) => (c.id === result.cookbook.id ? result.cookbook : c)));
       setGraphKey((k) => k + 1);
       return result.cookbook;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "run failed");
+      const message = err instanceof Error ? err.message : "run failed";
+      setError(message);
+      failPipeline(message);
       return null;
     } finally {
       setRunningBlockId(null);
@@ -135,14 +283,34 @@ export function Workbench() {
 
   async function runBlock(blockId: string) {
     if (!selected) return;
-    await runBlockOn(selected.id, blockId);
+    const block = selected.blocks.find((item) => item.id === blockId);
+    beginPipeline("Daytona verification", [
+      { id: "sandbox", label: "Run block in a fresh Daytona sandbox", status: "pending" },
+      { id: "proof", label: "Record Neo4j proof", status: "pending" },
+    ]);
+    const updated = await runBlockOn(
+      selected.id,
+      blockId,
+      block ? `Block ${block.index + 1}/${selected.blocks.length}` : undefined,
+    );
+    if (updated) completePipeline(updated.documented ? "Cookbook verified" : "Latest run recorded");
   }
 
   async function runAll() {
     if (!selected) return;
-    for (const block of selected.blocks) {
-      await runBlockOn(selected.id, block.id);
+    beginPipeline("Verify all blocks", [
+      { id: "sandbox", label: "Run every block in a fresh Daytona sandbox", status: "pending" },
+      { id: "proof", label: "Record Neo4j proof and recompute status", status: "pending" },
+    ]);
+    let latest: Cookbook | null = selected;
+    for (let i = 0; i < selected.blocks.length; i++) {
+      latest = await runBlockOn(
+        selected.id,
+        selected.blocks[i].id,
+        `Block ${i + 1}/${selected.blocks.length}`,
+      );
     }
+    if (latest) completePipeline(latest.documented ? "Every latest block passed" : "Runs recorded; cookbook is not verified");
     setGraphKey((k) => k + 1);
   }
 
@@ -151,13 +319,24 @@ export function Workbench() {
     if (!nextPrompt) return;
     setPhase("building");
     setBuildStatus("writing article");
+    beginPipeline("Build cookbook from scratch");
     setError(null);
     try {
-      const result = await api<{ cookbook: Cookbook; provider: string; model: string }>("/api/cookbook/build", {
-        method: "POST",
-        body: JSON.stringify({ prompt: nextPrompt }),
-      });
+      const result = await streamApi<{ cookbook: Cookbook; provider: string; model: string }>(
+        "/api/cookbook/build",
+        { prompt: nextPrompt },
+        (step, detail) => {
+          setBuildStatus(detail);
+          advancePipeline(step, detail);
+        },
+      );
       let book = result.cookbook;
+      advancePipeline(
+        "persisting",
+        result.provider === "mock"
+          ? "Article persisted from deterministic fallback (LLM unavailable)"
+          : `Article persisted · ${result.provider}/${result.model}`,
+      );
       setSelectedId(book.id);
       setCookbooks((prev) => {
         const rest = (prev ?? []).filter((c) => c.id !== book.id);
@@ -167,15 +346,26 @@ export function Workbench() {
       const total = book.blocks.length;
       for (let i = 0; i < book.blocks.length; i++) {
         setBuildStatus(`verifying block ${i + 1}/${total}`);
-        const updated = await runBlockOn(book.id, book.blocks[i].id);
+        advancePipeline("sandbox", `Block ${i + 1}/${total} · waiting for Daytona`);
+        const updated = await runBlockOn(book.id, book.blocks[i].id, `Block ${i + 1}/${total}`);
         if (updated) book = updated;
       }
+      advancePipeline("proof", "Refreshing latest Run nodes and cookbook status");
       const list = await refreshCookbooks();
       const latest = list.find((c) => c.id === book.id) ?? book;
       const state = cookbookState(latest);
       setBuildStatus(state === "broken" ? "broken" : state === "verified" ? "verified" : "unverified");
+      completePipeline(
+        state === "verified"
+          ? "Verified — every latest block passed"
+          : state === "broken"
+            ? "Complete with failures — inspect the failed block"
+            : "Complete — more verification is required",
+      );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "build failed");
+      const message = err instanceof Error ? err.message : "build failed";
+      setError(message);
+      failPipeline(message);
       setBuildStatus(null);
     } finally {
       setPhase("idle");
@@ -230,6 +420,7 @@ export function Workbench() {
                 <span className="font-mono text-[12px] text-ash">{buildStatus}</span>
               ) : null}
             </div>
+            {pipeline ? <ProgressPanel title={pipelineTitle} steps={pipeline} /> : null}
           </CardContent>
         </Card>
 
@@ -341,11 +532,11 @@ export function Workbench() {
       </div>
 
       <div className="min-w-0 min-h-[600px] xl:min-w-[600px]">
-        {phase === "generating" || (phase === "building" && buildStatus === "writing article") ? (
+        {phase === "generating" ? (
           <div className="flex min-h-[400px] flex-col items-center justify-center gap-3 rounded border border-border bg-card">
             <div className="h-6 w-6 animate-spin rounded-full border-2 border-ink border-t-transparent" />
             <p className="text-sm text-muted-foreground">
-              {phase === "building" ? "Writing article…" : `Writing “${plan?.conceptName}”…`}
+              {`Writing “${plan?.conceptName}”…`}
             </p>
           </div>
         ) : (
