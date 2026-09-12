@@ -72,7 +72,7 @@ curl -s localhost:4317/api/status
 ## Client modules
 
 - `lib/daytona.ts` — `runInSandbox({ command?, code?, language? })` creates a sandbox, runs, returns `{ stdout, exitCode, sandboxId, mode }`, and always deletes the sandbox (billing is on running/stopped sandboxes). `createSandbox` / `deleteSandbox` exposed for longer-lived use.
-- `lib/neo4j.ts` — `runCypher`, `upsertNodes`, `upsertRelationships`, `fetchSubgraph` (→ `{ nodes, links}`), `ensureVectorIndex` (cosine, 1536 dims default), `vectorSearch` (`db.index.vector.queryNodes`). Mock mode is an in-memory graph.
+- `lib/neo4j.ts` — `runCypher`, `upsertNodes`, `upsertRelationships`, `fetchSubgraph` (→ `{ nodes, links }`), `ensureVectorIndex` (cosine, 1536 dims default), `vectorSearch` (`db.index.vector.queryNodes`). Mock mode is an in-memory graph.
 - `lib/llm.ts` — `chat` / `chatStream` over an OpenAI-compatible endpoint. Provider order: Nosana → OpenAI → deterministic mock. Strips DeepSeek-R1 `<think>` blocks.
 - `lib/composio.ts` — `getComposio()` and `listTools(userId, toolkit)`.
 - `lib/env.ts` — env parsing and `integrationStatuses()`.
