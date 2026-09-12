@@ -1,5 +1,7 @@
 # Dennis, the AI Native Developer Relations
 
+![Dennis](docs/screenshots/Dennis.png)
+
 Neo4j picks the simplest remaining `@composio/core` lesson. Dennis writes a TypeScript cookbook. Daytona runs every block before it is marked verified.
 
 ![Dennis workbench](docs/screenshots/dennis-workbench.png)
