@@ -1,36 +1,81 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Docs that Test Themselves
 
-## Getting Started
+Self-verifying AI cookbooks for the Composio SDK. Neo4j chooses the missing lesson, Nosana writes it, and every code block must pass in a fresh Daytona sandbox before the cookbook is marked verified.
 
-First, run the development server:
+`npm install && npm run dev` boots on [http://localhost:4317](http://localhost:4317) with zero credentials. Mock planner, author, sandbox, and graph stay visibly labeled.
+
+## Flow
+
+1. **Neo4j plans.** Seeded Composio concepts + `PREREQ_OF` edges. `PLAN_CYPHER` picks the undocumented concept that unlocks the most others.
+2. **Nosana writes.** Strict Markdown: one H1, 2–4 independently runnable TypeScript blocks, PAT auth, no browser OAuth.
+3. **Daytona verifies.** Each Run is a fresh TypeScript sandbox. Evidence is written back as `(:CodeBlock)-[:VERIFIED_BY]->(:Run)`. Verified only when every latest run passes.
+
+## Run
+
+Requires Node.js 22.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env.local   # optional
+npm run dev                  # http://localhost:4317
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+```bash
+npm run lint
+npm run build
+npm run start
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Pre-UI Composio proof:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+COMPOSIO_API_KEY=… GITHUB_PAT=… npx tsx scripts/composio-github-check.ts
+```
 
-## Learn More
+## Local Neo4j
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+docker run --name cookbook-neo4j \
+  -p 7474:7474 -p 7687:7687 \
+  -e NEO4J_AUTH=neo4j/cookbook-local-password \
+  -d neo4j:5-community
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=cookbook-local-password
+NEO4J_DATABASE=neo4j
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Or point `NEO4J_URI` at Aura (`neo4j+s://…`). Do not set both.
 
-## Deploy on Vercel
+## Env
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+See `.env.example`. Live vs mock:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Integration | Live when | Mock fallback |
+| --- | --- | --- |
+| Daytona | `DAYTONA_API_KEY` | Deterministic static analysis, labeled `(mock sandbox)` |
+| Neo4j | `NEO4J_URI` + `NEO4J_PASSWORD` | Process-memory graph |
+| Nosana | `NOSANA_ENDPOINT` | OpenAI if `OPENAI_API_KEY`, else deterministic Markdown |
+| Composio | `COMPOSIO_API_KEY` | Static GitHub tool descriptors |
+
+A configured-but-dead Nosana URL fails with 502 (no automatic OpenAI retry in P0).
+
+`OPENAI_BASE_URL` is derived from `NOSANA_ENDPOINT` and injected into the sandbox only.
+
+## API
+
+```bash
+curl -s localhost:4317/api/status
+curl -s localhost:4317/api/cookbook
+curl -s -X POST localhost:4317/api/cookbook/plan
+curl -s -X POST localhost:4317/api/cookbook/generate -H 'content-type: application/json' \
+  -d '{"conceptId":"c-tool-calling","conceptName":"Give an agent GitHub tools"}'
+curl -s -X POST localhost:4317/api/cookbook/run -H 'content-type: application/json' \
+  -d '{"cookbookId":"<id>","blockId":"<id>-b0"}'
+curl -s 'localhost:4317/api/graph/subgraph?limit=500'
+```
+
+`/api/graph/query` and `/api/sandbox/run` are foundation/debug routes. Do not expose them publicly without auth.
