@@ -1,18 +1,42 @@
-# Docs that Test Themselves
+# Dennis, the AI Native Developer Relations
 
-Self-verifying AI cookbooks for the Composio SDK. Neo4j chooses the missing lesson, Nosana writes it, and every code block must pass in a fresh Daytona sandbox before the cookbook is marked verified.
+Neo4j picks the simplest remaining `@composio/core` lesson. Dennis writes a TypeScript cookbook. Daytona runs every block before it is marked verified.
 
-`npm install && npm run dev` boots on [http://localhost:4317](http://localhost:4317) with zero credentials. Mock planner, author, sandbox, and graph stay visibly labeled.
+![Dennis workbench](docs/screenshots/dennis-workbench.png)
 
-## Flow
+## Why
 
-1. **Neo4j plans.** Seeded Composio concepts + `PREREQ_OF` edges. `PLAN_CYPHER` picks the undocumented concept that unlocks the most others.
-2. **Nosana writes.** Strict Markdown: one H1, 2–4 independently runnable TypeScript blocks, PAT auth, no browser OAuth.
+Agents are the next readers of SDK docs. If an example does not run, they ship the breakage. Dennis treats a cookbook as unpublished until every code block passes in a fresh sandbox.
+
+## How it works
+
+1. **Neo4j plans.** Seeded Composio concepts plus `PREREQ_OF` edges. `PLAN_CYPHER` picks the undocumented lesson whose prerequisites are already documented.
+2. **OpenAI writes.** Strict Markdown: one H1, independently runnable TypeScript, PAT auth — no browser OAuth. Set `OPENAI_API_KEY` (default model `gpt-5.6-sol`). Without it, a deterministic mock author still produces a cookbook.
 3. **Daytona verifies.** Each Run is a fresh TypeScript sandbox. Evidence is written back as `(:CodeBlock)-[:VERIFIED_BY]->(:Run)`. Verified only when every latest run passes.
+4. **Composio is the first SDK.** The seed cookbooks teach `tools.get`, `tools.execute`, tool binding, and a nested Daytona exec against `@composio/core`.
+
+The header tiles show **LIVE** vs **mock** per integration. Missing keys do not crash the app; they fall back and stay labeled.
+
+## Screenshots
+
+Workbench, cookbook list, and one verified lesson:
+
+![Four seed cookbooks](docs/screenshots/dennis-cookbooks.png)
+
+![Eve + Composio detail](docs/screenshots/dennis-cookbook-detail.png)
+
+## Seed cookbooks
+
+| Cookbook | Lesson |
+| --- | --- |
+| Eve + Composio | Construct a `Composio` client and `tools.get` one GitHub schema |
+| Pi + Composio | `tools.get` then `tools.execute("GITHUB_GET_THE_AUTHENTICATED_USER")` with a PAT |
+| LangChain + Composio | Bind one GitHub tool descriptor and invoke it once |
+| Eve + Daytona | Nested Daytona sandbox, `node --version`, then delete |
 
 ## Run
 
-Requires Node.js 22.
+Requires Node.js 22. Boots on [http://localhost:4317](http://localhost:4317) with zero credentials.
 
 ```bash
 npm install
@@ -26,13 +50,16 @@ npm run build
 npm run start
 ```
 
-Pre-UI Composio proof:
+See `.env.example` for Daytona, Neo4j, OpenAI/Nosana, and Composio. Do not commit `.env.local`.
 
-```bash
-COMPOSIO_API_KEY=… GITHUB_PAT=… npx tsx scripts/composio-github-check.ts
-```
+| Integration | Live when | Mock fallback |
+| --- | --- | --- |
+| Daytona | `DAYTONA_API_KEY` | Deterministic static analysis, labeled `(mock sandbox)` |
+| Neo4j | `NEO4J_URI` + `NEO4J_PASSWORD` | Process-memory graph |
+| LLM | `OPENAI_API_KEY` (preferred) or `NOSANA_ENDPOINT` | Deterministic Markdown |
+| Composio | `COMPOSIO_API_KEY` | Static GitHub tool descriptors |
 
-## Local Neo4j
+Local Neo4j (optional):
 
 ```bash
 docker run --name cookbook-neo4j \
@@ -50,20 +77,11 @@ NEO4J_DATABASE=neo4j
 
 Or point `NEO4J_URI` at Aura (`neo4j+s://…`). Do not set both.
 
-## Env
+Pre-UI Composio proof (keys stay in your shell, not the repo):
 
-See `.env.example`. Live vs mock:
-
-| Integration | Live when | Mock fallback |
-| --- | --- | --- |
-| Daytona | `DAYTONA_API_KEY` | Deterministic static analysis, labeled `(mock sandbox)` |
-| Neo4j | `NEO4J_URI` + `NEO4J_PASSWORD` | Process-memory graph |
-| Nosana | `NOSANA_ENDPOINT` | OpenAI if `OPENAI_API_KEY`, else deterministic Markdown |
-| Composio | `COMPOSIO_API_KEY` | Static GitHub tool descriptors |
-
-A configured-but-dead Nosana URL fails with 502 (no automatic OpenAI retry in P0).
-
-`OPENAI_BASE_URL` is derived from `NOSANA_ENDPOINT` and injected into the sandbox only.
+```bash
+npx tsx scripts/composio-github-check.ts
+```
 
 ## API
 
