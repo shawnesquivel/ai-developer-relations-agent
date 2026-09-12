@@ -68,7 +68,7 @@ export class MockGraph {
       nodes: sliced.map((n) => ({
         id: n.id,
         label: n.labels[0] ?? "Node",
-        name: String(n.props.name ?? n.props.title ?? n.id),
+        name: String(n.props.title ?? n.props.name ?? n.id),
         documented: typeof n.props.documented === "boolean" ? n.props.documented : undefined,
         status: n.props.status === "pass" || n.props.status === "fail" ? n.props.status : undefined,
       })),
@@ -225,7 +225,7 @@ export async function fetchSubgraph(label?: string, limit = 200): Promise<{
      OPTIONAL MATCH (n)-[r]->(m)
      WHERE m IS NULL OR id(m) IS NOT NULL
      RETURN n.id AS id, labels(n) AS labels,
-            coalesce(n.name, n.title, n.id) AS name,
+            coalesce(n.title, n.name, n.id) AS name,
             n.documented AS documented, n.status AS status,
             startNode(r).id AS source, endNode(r).id AS target, type(r) AS type`,
     { limit: neo4j.int(capped) },

@@ -105,7 +105,7 @@ function seedIntoMock() {
       },
     ]);
     for (const block of cb.blocks) {
-      g.upsertNodes([{ id: block.id, label: "CodeBlock", props: { name: block.id, index: block.index, lang: block.lang, code: block.code } }]);
+      g.upsertNodes([{ id: block.id, label: "CodeBlock", props: { name: `block ${block.index + 1}`, index: block.index, lang: block.lang, code: block.code } }]);
     }
     for (const run of cb.runs) {
       g.upsertNodes([
@@ -133,6 +133,9 @@ function seedIntoMock() {
     }
     for (const block of cb.blocks) {
       g.upsertRelationships([{ from: cb.id, to: block.id, type: "CONTAINS" }]);
+    }
+    for (const use of cb.uses ?? []) {
+      g.upsertRelationships([{ from: use.blockId, to: use.slug, type: "USES" }]);
     }
     for (const block of cb.blocks) {
       for (const rel of g.outgoing(block.id, "VERIFIED_BY")) {
@@ -187,7 +190,7 @@ async function persistSeedCookbook(cb: (typeof SEED_COOKBOOKS)[number], withBloc
   if (!withBlocks) return;
   for (const block of cb.blocks) {
     await upsertNodes([
-      { id: block.id, label: "CodeBlock", props: { name: block.id, index: block.index, lang: block.lang, code: block.code } },
+      { id: block.id, label: "CodeBlock", props: { name: `block ${block.index + 1}`, index: block.index, lang: block.lang, code: block.code } },
     ]);
     await upsertRelationships([{ from: id, to: block.id, type: "CONTAINS" }]);
     if (neo4jLive()) {
@@ -215,6 +218,9 @@ async function persistSeedCookbook(cb: (typeof SEED_COOKBOOKS)[number], withBloc
       },
     ]);
     await upsertRelationships([{ from: run.blockId, to: run.id, type: "VERIFIED_BY" }]);
+  }
+  for (const use of cb.uses ?? []) {
+    await upsertRelationships([{ from: use.blockId, to: use.slug, type: "USES" }]);
   }
 }
 
@@ -686,17 +692,11 @@ export async function createCookbook(input: {
   provider: string;
 }): Promise<Cookbook> {
   await ensureSeeded();
-  let markdown = input.markdown;
-  let blocks = extractCodeBlocks(markdown);
-  if (!blocks.length) {
-    const { mockCookbook } = await import("./generate");
-    const { resolveGithubToolSlugs } = await import("./composio");
-    markdown = mockCookbook(
-      input.conceptName,
-      await resolveGithubToolSlugs(await toolsForConcept(input.conceptId)),
-    );
-    blocks = extractCodeBlocks(markdown);
-  }
+  const { ensureFullArticle, inferUsedTools } = await import("./articles");
+  const { resolveGithubToolSlugs } = await import("./composio");
+  const slugs = await resolveGithubToolSlugs(await toolsForConcept(input.conceptId));
+  const markdown = ensureFullArticle(input.markdown, input.conceptName, slugs);
+  const blocks = extractCodeBlocks(markdown);
   const title = extractTitle(markdown, input.conceptName);
   const id = `cb-${input.conceptId}-${randomUUID().slice(0, 8)}`;
   const createdAt = new Date().toISOString();
@@ -705,7 +705,7 @@ export async function createCookbook(input: {
       id,
       label: "Cookbook",
       props: {
-        name: id,
+        name: title,
         title,
         markdown,
         documented: false,
@@ -722,13 +722,17 @@ export async function createCookbook(input: {
       {
         id: blockId,
         label: "CodeBlock",
-        props: { name: blockId, index: block.index, lang: block.lang, code: block.code },
+        props: { name: `block ${block.index + 1}`, index: block.index, lang: block.lang, code: block.code },
       },
     ]);
   }
+  const uses = blocks.flatMap((block, i) =>
+    inferUsedTools(block.code).map((slug) => ({ from: blockIds[i], to: slug, type: "USES" as const })),
+  );
   await upsertRelationships([
     { from: id, to: input.conceptId, type: "COVERS" },
     ...blockIds.map((blockId) => ({ from: id, to: blockId, type: "CONTAINS" })),
+    ...uses,
   ]);
   const created = await getCookbook(id);
   if (!created) throw new Error("Failed to persist cookbook");

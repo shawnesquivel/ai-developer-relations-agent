@@ -15,6 +15,7 @@ export type SeedCookbook = {
   createdAt: string;
   verifiedAt?: string;
   blocks: { id: string; index: number; lang: string; code: string }[];
+  uses?: { blockId: string; slug: string }[];
   runs: {
     blockId: string;
     id: string;

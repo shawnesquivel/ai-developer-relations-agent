@@ -6,6 +6,7 @@ import { CookbookView, cookbookState } from "@/components/cookbook-view";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { BUILD_STARTERS } from "@/lib/articles";
 import type { BrokenCookbook, Cookbook, PlanResult } from "@/lib/graph-types";
 import { cn } from "@/lib/utils";
 
@@ -37,7 +38,9 @@ export function Workbench() {
   const [broken, setBroken] = useState<BrokenCookbook[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [plan, setPlan] = useState<PlanResult | null>(null);
-  const [phase, setPhase] = useState<"idle" | "planning" | "generating">("idle");
+  const [phase, setPhase] = useState<"idle" | "planning" | "generating" | "building">("idle");
+  const [buildStatus, setBuildStatus] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [runningBlockId, setRunningBlockId] = useState<string | null>(null);
   const [graphKey, setGraphKey] = useState(0);
@@ -111,40 +114,125 @@ export function Workbench() {
     }
   }
 
-  async function runBlock(blockId: string) {
-    if (!selected) return;
+  async function runBlockOn(cookbookId: string, blockId: string) {
     setRunningBlockId(blockId);
     setError(null);
     try {
       const result = await api<{ cookbook: Cookbook }>("/api/cookbook/run", {
         method: "POST",
-        body: JSON.stringify({ cookbookId: selected.id, blockId }),
+        body: JSON.stringify({ cookbookId, blockId }),
       });
       setCookbooks((prev) => (prev ?? []).map((c) => (c.id === result.cookbook.id ? result.cookbook : c)));
       setGraphKey((k) => k + 1);
+      return result.cookbook;
     } catch (err) {
       setError(err instanceof Error ? err.message : "run failed");
+      return null;
     } finally {
       setRunningBlockId(null);
     }
   }
 
+  async function runBlock(blockId: string) {
+    if (!selected) return;
+    await runBlockOn(selected.id, blockId);
+  }
+
   async function runAll() {
     if (!selected) return;
     for (const block of selected.blocks) {
-      await runBlock(block.id);
-      const latest = await refreshCookbooks();
-      const current = latest.find((c) => c.id === selected.id);
-      if (current) setSelectedId(current.id);
+      await runBlockOn(selected.id, block.id);
     }
     setGraphKey((k) => k + 1);
   }
 
+  async function doBuild() {
+    const nextPrompt = prompt.trim();
+    if (!nextPrompt) return;
+    setPhase("building");
+    setBuildStatus("writing article");
+    setError(null);
+    try {
+      const result = await api<{ cookbook: Cookbook; provider: string; model: string }>("/api/cookbook/build", {
+        method: "POST",
+        body: JSON.stringify({ prompt: nextPrompt }),
+      });
+      let book = result.cookbook;
+      setSelectedId(book.id);
+      setCookbooks((prev) => {
+        const rest = (prev ?? []).filter((c) => c.id !== book.id);
+        return [...rest, book];
+      });
+      setGraphKey((k) => k + 1);
+      const total = book.blocks.length;
+      for (let i = 0; i < book.blocks.length; i++) {
+        setBuildStatus(`verifying block ${i + 1}/${total}`);
+        const updated = await runBlockOn(book.id, book.blocks[i].id);
+        if (updated) book = updated;
+      }
+      const list = await refreshCookbooks();
+      const latest = list.find((c) => c.id === book.id) ?? book;
+      const state = cookbookState(latest);
+      setBuildStatus(state === "broken" ? "broken" : state === "verified" ? "verified" : "unverified");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "build failed");
+      setBuildStatus(null);
+    } finally {
+      setPhase("idle");
+    }
+  }
+
   const busy = phase !== "idle" || Boolean(runningBlockId);
+  const graphFocus = selectedId ?? plan?.conceptId ?? null;
 
   return (
     <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
       <div className="min-w-0 space-y-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>Build from scratch</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              One button writes a full article, persists it, then verifies every block in Daytona.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex flex-wrap gap-2">
+              {BUILD_STARTERS.map((starter) => (
+                <button
+                  key={starter.id}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setPrompt(starter.prompt)}
+                  className={cn(
+                    "rounded-md border px-2.5 py-1.5 text-left text-[11px] leading-4 transition-colors",
+                    prompt === starter.prompt
+                      ? "border-ink bg-secondary"
+                      : "border-border bg-bone hover:bg-secondary/50",
+                  )}
+                >
+                  {starter.prompt}
+                </button>
+              ))}
+            </div>
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="Or type a custom prompt…"
+              rows={2}
+              disabled={busy}
+              className="w-full resize-none rounded-md border border-border bg-bone px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <Button onClick={() => void doBuild()} disabled={busy || !prompt.trim()}>
+                {phase === "building" ? "Building…" : "Build cookbook"}
+              </Button>
+              {buildStatus ? (
+                <span className="font-mono text-[12px] text-ash">{buildStatus}</span>
+              ) : null}
+            </div>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
             <CardTitle>Planner</CardTitle>
@@ -201,7 +289,7 @@ export function Workbench() {
           </CardContent>
         </Card>
 
-        <GraphCanvas highlightId={plan?.conceptId} refreshKey={graphKey} />
+        <GraphCanvas highlightId={plan?.conceptId} focusId={graphFocus} refreshKey={graphKey} />
 
         <Card>
           <CardHeader>
@@ -231,7 +319,9 @@ export function Workbench() {
                         {state === "broken" ? "Broken" : state === "verified" ? "Verified" : "Unverified"}
                       </Badge>
                     </div>
-                    <p className="text-[11px] text-muted-foreground">{book.conceptName}</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {book.conceptName} · {book.blocks.length} blocks
+                    </p>
                   </button>
                 );
               })
@@ -241,7 +331,7 @@ export function Workbench() {
                 <p className="text-[11px] font-medium text-crimson">Broken</p>
                 {broken.map((item, index) => (
                   <p key={`${item.id}-${item.blockIndex}-${index}`} className="text-[11px] text-crimson">
-                    {item.title} · block {item.blockIndex}
+                    {item.title} · block {item.blockIndex + 1}
                   </p>
                 ))}
               </div>
@@ -251,11 +341,11 @@ export function Workbench() {
       </div>
 
       <div className="min-w-0 min-h-[600px] xl:min-w-[600px]">
-        {phase === "generating" ? (
+        {phase === "generating" || (phase === "building" && buildStatus === "writing article") ? (
           <div className="flex min-h-[400px] flex-col items-center justify-center gap-3 rounded border border-border bg-card">
             <div className="h-6 w-6 animate-spin rounded-full border-2 border-ink border-t-transparent" />
             <p className="text-sm text-muted-foreground">
-              Writing “{plan?.conceptName}” with the {plan?.mode === "live" ? "Nosana" : "mock"} model…
+              {phase === "building" ? "Writing article…" : `Writing “${plan?.conceptName}”…`}
             </p>
           </div>
         ) : (

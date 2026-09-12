@@ -61,6 +61,7 @@ export type GraphNode = {
   name: string;
   documented?: boolean;
   status?: RunStatus;
+  detail?: string;
 };
 
 export type GraphLink = {

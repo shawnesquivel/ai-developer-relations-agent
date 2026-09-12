@@ -1,8 +1,9 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { draftComposioIssue } from "@/lib/articles";
 import { splitMarkdown } from "@/lib/markdown";
 import type { CodeBlock, Cookbook } from "@/lib/graph-types";
 import { cn } from "@/lib/utils";
@@ -89,13 +90,69 @@ export function Prose({ markdown }: { markdown: string }) {
   return <div>{nodes}</div>;
 }
 
+function IssueDraft({ cookbookTitle, block }: { cookbookTitle: string; block: CodeBlock }) {
+  const run = block.latestRun;
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  if (run?.status !== "fail") return null;
+  const draft = draftComposioIssue({
+    cookbookTitle,
+    blockIndex: block.index,
+    stdout: run.stdout,
+    sandboxId: run.sandboxId,
+    mode: run.mode,
+    exitCode: run.exitCode,
+  });
+  return (
+    <div className="border-t border-crimson/30 bg-linen px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" variant="outline" onClick={() => setOpen((v) => !v)}>
+          Draft Composio issue
+        </Button>
+        <Badge variant="mock">MOCK / DRAFT</Badge>
+        <span className="text-[11px] text-muted-foreground">Does not call GitHub</span>
+      </div>
+      {open ? (
+        <div className="mt-2 space-y-2">
+          <p className="text-[11px] text-muted-foreground">
+            Intent: Composio <code className="font-mono">GITHUB_CREATE_AN_ISSUE</code>. This control only fills a
+            draft.
+          </p>
+          <input
+            readOnly
+            value={draft.title}
+            className="w-full rounded border border-border bg-bone px-2 py-1 font-mono text-[11px]"
+          />
+          <textarea
+            readOnly
+            value={draft.body}
+            rows={10}
+            className="w-full rounded border border-border bg-bone px-2 py-1 font-mono text-[11px]"
+          />
+          <Button
+            size="sm"
+            onClick={async () => {
+              await navigator.clipboard.writeText(`${draft.title}\n\n${draft.body}`);
+              setCopied(true);
+            }}
+          >
+            {copied ? "Copied draft (still mock)" : "Copy draft"}
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function BlockCard({
   block,
+  cookbookTitle,
   running,
   disabled,
   onRun,
 }: {
   block: CodeBlock;
+  cookbookTitle: string;
   running: boolean;
   disabled: boolean;
   onRun: () => void;
@@ -105,7 +162,7 @@ function BlockCard({
   const badge = running
     ? "running in sandbox…"
     : run
-      ? `${run.status === "pass" ? "passed" : "failed"} ${fmt(run.at)} · exit ${run.exitCode}${run.mode === "mock" ? " (mock sandbox)" : ""}`
+      ? `${run.status === "pass" ? "passed" : "failed"} ${fmt(run.at)} · exit ${run.exitCode}${run.mode === "mock" ? " (mock sandbox)" : " (live sandbox)"}`
       : "not yet run";
   return (
     <div className={cn("overflow-hidden rounded border-2 bg-bone", border)}>
@@ -124,10 +181,16 @@ function BlockCard({
       </div>
       <pre className="max-h-72 overflow-auto px-3 py-2 font-mono text-xs leading-5">{block.code}</pre>
       {run?.stdout ? (
-        <pre className="max-h-40 overflow-auto border-t border-stone bg-linen px-3 py-2 font-mono text-[12px] text-ash">
+        <pre
+          className={cn(
+            "max-h-40 overflow-auto border-t border-stone px-3 py-2 font-mono text-[12px]",
+            run.status === "fail" ? "bg-linen text-crimson" : "bg-linen text-ash",
+          )}
+        >
           {run.stdout}
         </pre>
       ) : null}
+      <IssueDraft cookbookTitle={cookbookTitle} block={block} />
     </div>
   );
 }
@@ -146,16 +209,13 @@ export function CookbookView({
   if (!cookbook) {
     return (
       <div className="rounded border border-dashed border-border bg-card p-6 font-serif text-sm text-muted-foreground">
-        Select a cookbook from the list, or let the graph choose the next concept.
+        Select a cookbook from the list, build one from scratch, or let the graph choose the next concept.
       </div>
     );
   }
   const state = cookbookState(cookbook);
   const passing = cookbook.blocks.filter((b) => b.latestRun?.status === "pass").length;
   const failing = cookbook.blocks.filter((b) => b.latestRun?.status === "fail").length;
-  const share = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
-    `Verified cookbook: ${cookbook.title} — Docs that Test Themselves`,
-  )}`;
   const segments = splitMarkdown(cookbook.markdown);
   let nextBlock = 0;
 
@@ -168,15 +228,13 @@ export function CookbookView({
             <span className="text-[11px] text-muted-foreground">
               {passing}/{cookbook.blocks.length} passing · {cookbook.conceptName}
               {cookbook.provider !== "seed" ? ` · ${cookbook.provider}` : ""}
+              {cookbook.blocks.some((b) => b.latestRun?.mode === "mock") ? " · mock runs are not live proof" : ""}
             </span>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" disabled={Boolean(runningBlockId)} onClick={onRunAll}>
             Verify all blocks
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => window.open(share, "_blank")}>
-            Share on X
           </Button>
         </div>
       </header>
@@ -187,6 +245,7 @@ export function CookbookView({
         return (
           <BlockCard
             key={`${block.id}-${i}`}
+            cookbookTitle={cookbook.title}
             block={block}
             running={runningBlockId === block.id}
             disabled={Boolean(runningBlockId)}
