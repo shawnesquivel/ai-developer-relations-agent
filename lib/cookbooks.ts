@@ -64,6 +64,7 @@ function coverIds(cb: (typeof SEED_COOKBOOKS)[number]): string[] {
 type GlobalSeed = typeof globalThis & { __cookbookSeedGen?: string };
 
 const SEED_GEN = [
+  "source-sync-v2",
   CONCEPTS.map((c) => `${c.id}:${c.documented}:${c.sourceHash ?? ""}`).join(","),
   SEED_COOKBOOKS.map((cb) => `${cb.id}:${cb.title}:${cb.documented}:${cb.blocks.map((b) => b.code.length).join("-")}`).join(","),
 ].join("|");
@@ -86,12 +87,41 @@ function conceptProps(concept: (typeof CONCEPTS)[number]) {
   };
 }
 
+function seedConceptsMock() {
+  const graph = getMockGraph();
+  graph.upsertNodes(
+    CONCEPTS.map((concept) => {
+      const existing = graph.nodes.get(concept.id);
+      const props = conceptProps(concept);
+      if (existing?.props.documented === true) props.documented = true;
+      return { id: concept.id, label: "Concept", props };
+    }),
+  );
+}
+
+async function seedConceptsNeo4j() {
+  await runCypher(
+    `UNWIND $rows AS row
+     MERGE (c:Concept {id: row.id})
+     ON CREATE SET c.documented = row.documented
+     SET c += row.props`,
+    {
+      rows: CONCEPTS.map((concept) => {
+        const props = conceptProps(concept);
+        const { documented, ...sourceProps } = props;
+        return { id: concept.id, documented, props: sourceProps };
+      }),
+    },
+  );
+}
+
 export async function ensureSeeded(): Promise<void> {
   if (!neo4jLive()) {
     seedIntoMock();
     retireLegacyMock();
     stripStaleSeedCoversMock();
     dedupeMockCookbooks();
+    reconcileDocumentedConceptsMock();
     return;
   }
   if (seededFlag().__cookbookSeedGen === SEED_GEN) return;
@@ -99,12 +129,13 @@ export async function ensureSeeded(): Promise<void> {
   await stripStaleSeedCovers();
   await dedupeNeo4jCookbooks();
   await retireLegacyNeo4j();
+  await reconcileDocumentedConceptsNeo4j();
   seededFlag().__cookbookSeedGen = SEED_GEN;
 }
 
 function seedIntoMock() {
   const g = getMockGraph();
-  g.upsertNodes(CONCEPTS.map((c) => ({ id: c.id, label: "Concept", props: conceptProps(c) })));
+  seedConceptsMock();
   g.upsertNodes(TOOLKITS.map((t) => ({ id: t.id, label: "Toolkit", props: { name: t.name, slug: t.slug } })));
   g.upsertNodes(TOOLS.map((t) => ({ id: t.id, label: "Tool", props: { name: t.name, description: t.description } })));
   for (const cb of SEED_COOKBOOKS) {
@@ -244,7 +275,7 @@ async function persistSeedCookbook(cb: (typeof SEED_COOKBOOKS)[number], withBloc
 }
 
 async function seedIntoNeo4j() {
-  await upsertNodes(CONCEPTS.map((c) => ({ id: c.id, label: "Concept", props: conceptProps(c) })));
+  await seedConceptsNeo4j();
   await upsertNodes(TOOLKITS.map((t) => ({ id: t.id, label: "Toolkit", props: { name: t.name, slug: t.slug } })));
   await upsertNodes(TOOLS.map((t) => ({ id: t.id, label: "Tool", props: { name: t.name, description: t.description } })));
   await upsertRelationships(SEED_LINKS);
@@ -273,6 +304,24 @@ function stripStaleSeedCoversMock() {
 
 function dedupeMockCookbooks() {
   // MockGraph is keyed by stable id. Repeated titles are valid generated revisions.
+}
+
+function reconcileDocumentedConceptsMock() {
+  const graph = getMockGraph();
+  for (const relation of graph.rels.filter((rel) => rel.type === "TEACHES")) {
+    const cookbook = graph.nodes.get(relation.from);
+    const concept = graph.nodes.get(relation.to);
+    if (cookbook?.props.documented === true && concept?.labels.includes("Concept")) {
+      concept.props.documented = true;
+    }
+  }
+}
+
+async function reconcileDocumentedConceptsNeo4j() {
+  await runCypher(
+    `MATCH (cb:Cookbook {documented: true})-[:TEACHES]->(c:Concept)
+     SET c.documented = true`,
+  );
 }
 
 async function stripStaleSeedCovers() {
@@ -313,11 +362,9 @@ async function dedupeNeo4jCookbooks() {
 function retireLegacyMock() {
   const g = getMockGraph();
   const currentIds = new Set(CONCEPTS.map((c) => c.id));
-  const undocumentedIds = new Set(CONCEPTS.filter((c) => !c.documented).map((c) => c.id));
   for (const node of g.nodesByLabel("Concept")) {
     if (!currentIds.has(node.id)) node.props.documented = true;
   }
-  g.rels = g.rels.filter((rel) => !(rel.type === "TEACHES" && undocumentedIds.has(rel.to)));
   for (const id of LEGACY_CONCEPT_IDS) {
     for (const rel of g.incoming(id, "COVERS")) {
       const keep = g.outgoing(rel.from, "COVERS").some((r) => currentIds.has(r.to) && r.to !== id);
@@ -334,7 +381,6 @@ function retireLegacyMock() {
 
 async function retireLegacyNeo4j() {
   const currentIds = CONCEPTS.map((c) => c.id);
-  const undocumentedIds = CONCEPTS.filter((c) => !c.documented).map((c) => c.id);
   const legacyIds = [...LEGACY_CONCEPT_IDS];
 
   await runCypher(
@@ -363,16 +409,6 @@ async function retireLegacyNeo4j() {
      DETACH DELETE c`,
     { legacyIds },
   );
-  if (undocumentedIds.length) {
-    await runCypher(
-      `MATCH (c:Concept)
-       WHERE c.id IN $undocumentedIds
-       OPTIONAL MATCH (:Cookbook)-[t:TEACHES]->(c)
-       DELETE t
-       SET c.documented = false`,
-      { undocumentedIds },
-    );
-  }
 }
 
 function walkUnlocks(conceptId: string): string[] {
