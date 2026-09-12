@@ -2,6 +2,8 @@
 
 ![Dennis](docs/screenshots/Dennis.png)
 
+[Slides](https://gamma.app/docs/The-AI-Native-Developer-Relations-8v6kpoxjak6z5at?mode=present#card-uvnvr4m7av0wb0i)
+
 Neo4j picks the simplest remaining `@composio/core` lesson. Dennis writes a TypeScript cookbook. Daytona runs every block before it is marked verified.
 
 ![Dennis workbench](docs/screenshots/dennis-workbench.png)
@@ -18,6 +20,17 @@ Agents are the next readers of SDK docs. If an example does not run, they ship t
 4. **Composio is the first SDK.** The seed cookbooks teach `tools.get`, `tools.execute`, tool binding, and a nested Daytona exec against `@composio/core`.
 
 The header tiles show **LIVE** vs **mock** per integration. Missing keys do not crash the app; they fall back and stay labeled.
+
+```mermaid
+flowchart LR
+  Dennis["Dennis"] --> Neo4j["Neo4j"]
+  Neo4j --> LLM["OpenAI / Nosana"]
+  LLM --> Daytona["Daytona"]
+  Daytona --> Composio["Composio"]
+  Composio --> Readers["Agents + humans"]
+```
+
+[Open in Excalidraw](https://excalidraw.com) — drag and drop [`docs/dennis-stack.excalidraw`](docs/dennis-stack.excalidraw) onto the canvas. GitHub does not render `.excalidraw` files.
 
 ## Screenshots
 
